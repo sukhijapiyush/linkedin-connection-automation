@@ -1,11 +1,11 @@
 import time
 import random
-from logging import basicConfig, INFO, WARN, DEBUG, ERROR, Logger
-from typing import TypedDict, List, Any, Annotated, Dict, Optional
+import psutil
+from logging import basicConfig, INFO, Logger
+from typing import TypedDict
 import pyautogui
 from langgraph.graph import StateGraph, END
 from langchain.prompts import ChatPromptTemplate
-from langchain_core.output_parsers import JsonOutputParser
 from config import FAILSAFE, API_KEY, smart_llm_object, fast_llm_object, PAGE_LIMIT
 
 # --- Configuration ---
@@ -15,6 +15,21 @@ pyautogui.FAILSAFE = FAILSAFE
 # Basic logging setup
 basicConfig(level=INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = Logger(__name__)
+
+
+# --- Helper Functions ---
+
+
+def is_browser_running():
+    """Check if a web browser process is running."""
+    # Add browser executable names you use, e.g., 'msedge.exe' for Microsoft Edge
+    browser_processes = ["chrome.exe", "firefox.exe", "msedge.exe", "safari.exe"]
+    for proc in psutil.process_iter(["name"]):
+        if proc.info["name"] in browser_processes:
+            logger.info(f"Browser process '{proc.info['name']}' is running.")
+            return True
+    logger.warning("No web browser process found running.")
+    return False
 
 
 # --- Setting the Global LLm objects ---
@@ -48,6 +63,7 @@ class GraphState(TypedDict):
     search_string: str
     page_limit: int
     current_page: int
+    intial_search_status: bool
 
 
 class Linkedin_Connector:
@@ -60,29 +76,51 @@ class Linkedin_Connector:
     def initial_search(self, state):
         """
         Perform the initial search on LinkedIn.
+        Checks if a browser is running, takes a screenshot, finds the search bar,
+        types the search query, and presses Enter.,
         """
         search_string = state["search_string"]
-        logger.info(f"Starting initial search for: {search_string}")
+        logger.info(f"Starting initial search for: '{search_string}'")
 
-        # This is a placeholder for the actual pyautogui automation
-        # In a real scenario, you would have code like this:
-        #
-        # search_bar_location = pyautogui.locateCenterOnScreen('search_bar.png', confidence=0.8)
-        # if search_bar_location:
-        #     pyautogui.click(search_bar_location)
-        #     pyautogui.write(search_string)
-        #     pyautogui.press('enter')
-        #     time.sleep(2)
-        #     people_filter_location = pyautogui.locateCenterOnScreen('people_filter.png', confidence=0.8)
-        #     if people_filter_location:
-        #         pyautogui.click(people_filter_location)
-        # else:
-        #     logger.error("Could not find the LinkedIn search bar.")
+        if not is_browser_running():
+            logger.error(
+                "Browser is not running. Please open a browser and log in to LinkedIn."
+            )
+            return {"initial_search_status": False}
 
-        print(f"Executing search for: {search_string}")
-        # For the purpose of this example, we'll just log the action
-        logger.info("Initial search node executed.")
-        return state
+        try:
+
+            # IMPORTANT: You need to create a 'search_bar.png' image.
+            # This image should be a small screenshot of the LinkedIn search bar.
+            search_bar_location = pyautogui.locateCenterOnScreen(
+                "assets/search_bar.png"
+            )
+            logger.info("Attempting to locate the LinkedIn search bar on the screen...")
+
+            if search_bar_location:
+                logger.info(f"Found search bar at: {search_bar_location}")
+                pyautogui.click(search_bar_location)
+                time.sleep(1)  # Wait a moment for the click to register
+                pyautogui.write(search_string, interval=0.1)
+                pyautogui.press("enter")
+                logger.info(
+                    f"Typed '{search_string}' into the search bar and pressed Enter."
+                )
+                return {
+                    "initial_search_status": True,
+                }
+            else:
+                logger.error(
+                    "Could not find the LinkedIn search bar on the screen. Make sure the browser window is visible."
+                )
+                return {"initial_search_status": False}
+
+        except pyautogui.PyAutoGUIException as e:
+            logger.error(f"An error occurred with PyAutoGUI: {e}")
+            return {"initial_search_status": False}
+        except Exception as e:
+            logger.error(f"An unexpected error occurred: {e}")
+            return {"initial_search_status": False}
 
     def create_workflow(self):
         """
@@ -94,6 +132,8 @@ class Linkedin_Connector:
 
         workflow.set_entry_point("initial_search")
 
+        # For now, the workflow ends after the initial search.
+        # We will add more nodes later.
         workflow.add_edge("initial_search", END)
 
         return workflow.compile()
@@ -107,18 +147,19 @@ class Linkedin_Connector:
             "page_limit": self.page_limit,
             "current_page": self.current_page,
         }
+        # The invoke method will execute the workflow starting from the entry point.
         self.workflow.invoke(initial_state)
 
 
 if __name__ == "__main__":
     print("=" * 50)
     print(
-        "IMPORTANT: Make sure browser is up and running. Also you have linkedin logged in and in focus"
+        "IMPORTANT: Make sure a browser is running with LinkedIn logged in and visible on the screen."
     )
     search_string = input("\nEnter the search string: ")
-    print("The Script will start in 10 seconds. Press Ctrl+C to cancel.")
+    print("The Script will start in 5 seconds. Press Ctrl+C to cancel.")
     print("=" * 50)
-    time.sleep(10)
+    time.sleep(5)
 
     logger.info("--- LinkedIn Connection Bot Starting ---")
     logger.info("You have 5 seconds to switch to your LinkedIn window...")

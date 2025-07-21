@@ -12,6 +12,7 @@ from config import FAILSAFE, API_KEY, smart_llm_object, fast_llm_object, PAGE_LI
 from screenshot import scroll_screenshot
 import base64
 import json
+import tkinter as tk
 
 # --- Configuration ---
 
@@ -32,6 +33,49 @@ logger.info("Logger initialized and log file reset.")
 
 
 # --- Helper Functions ---
+
+
+def countdown(seconds, message=""):
+    """Displays a countdown timer popup and waits for the specified duration."""
+    root = tk.Tk()
+    root.title("LinkedIn Bot Status")
+
+    # Make window borderless and stay on top
+    root.overrideredirect(True)
+    root.attributes("-topmost", True)
+
+    # Create a label with the message and timer
+    label_text = f"{message}\nContinuing in {seconds} seconds..."
+    label = tk.Label(
+        root,
+        text=label_text,
+        font=("Helvetica", 14),
+        bg="lightblue",
+        fg="black",
+        padx=20,
+        pady=20,
+    )
+    label.pack()
+
+    # Center the window on the screen
+    root.update_idletasks()  # Update geometry
+    window_width = root.winfo_width()
+    window_height = root.winfo_height()
+    position_right = int(root.winfo_screenwidth() / 2 - window_width / 2)
+    position_down = int(root.winfo_screenheight() / 2 - window_height / 2)
+    root.geometry(f"+{position_right}+{position_down}")
+
+    def update_clock(sec):
+        new_text = f"{message}\nContinuing in {sec} seconds..."
+        label.config(text=new_text)
+        if sec > 0:
+            root.after(1000, update_clock, sec - 1)
+        else:
+            root.destroy()
+
+    # Start the countdown
+    root.after(1000, update_clock, seconds - 1)
+    root.mainloop()
 
 
 def is_browser_running():
@@ -144,7 +188,7 @@ class Linkedin_Connector:
             logger.info(
                 f"Typed '{search_string}' into the search bar and pressed Enter."
             )
-            time.sleep(10)  # Wait for search results to load
+            countdown(10, "Waiting for search results to load...")
 
             logger.debug("Attempting to locate 'People' filter on screen...")
             people_filter_location = pyautogui.locateCenterOnScreen(
@@ -154,7 +198,7 @@ class Linkedin_Connector:
             if people_filter_location:
                 pyautogui.click(people_filter_location)
                 logger.info("Clicked the 'People' filter.")
-                time.sleep(10)
+                countdown(10, "Waiting for filtered results to load...")
             else:
                 logger.warning("Could not find the 'People' filter button.")
 
@@ -190,7 +234,7 @@ class Linkedin_Connector:
                 else:
                     pyautogui.click(company_filter_location)
                     logger.debug("Clicked 'Current company' filter button.")
-                    time.sleep(4)
+                    countdown(4, "Opening company filter...")
 
                     add_company_input = pyautogui.locateCenterOnScreen(
                         "assets/add_company_input.png", confidence=0.5
@@ -213,12 +257,12 @@ class Linkedin_Connector:
                             logger.debug(f"Typing company name: {company}")
                             pyautogui.write(company, interval=0.1)
                             logger.debug(f"Typed company name: {company}")
-                            time.sleep(5)
+                            countdown(5, f"Searching for company '{company}'...")
                             pyautogui.click(
                                 (add_company_input.x, add_company_input.y + 30)
                             )
                             logger.info(f"Added company: {company}")
-                            time.sleep(5)
+                            countdown(5, "Waiting after adding company...")
 
                     show_results_button = pyautogui.locateCenterOnScreen(
                         "assets/show_results_button.png", confidence=0.8
@@ -227,7 +271,7 @@ class Linkedin_Connector:
                     if show_results_button:
                         pyautogui.click(show_results_button)
                         logger.info("Clicked 'Show results' for company filters.")
-                        time.sleep(5)
+                        countdown(5, "Applying company filters...")
                     else:
                         logger.warning("Could not find 'Show results' button.")
                         pyautogui.press("esc")  # Close the dropdown if button not found
@@ -245,7 +289,7 @@ class Linkedin_Connector:
                     if connection_button:
                         pyautogui.click(connection_button)
                         logger.info(f"Clicked '{conn}' connection filter button.")
-                        time.sleep(5)
+                        countdown(5, f"Applying '{conn}' filter...")
                     else:
                         logger.warning(
                             f"Could not find '{conn}' connection filter button."
@@ -417,11 +461,10 @@ if __name__ == "__main__":
     print("The Script will start in 5 seconds. Press Ctrl+C to cancel.")
     print("=" * 50)
     logger.info("Waiting 5 seconds before starting workflow.")
-    time.sleep(5)
+    countdown(5, "Bot starting...")
 
     logger.info("--- LinkedIn Connection Bot Starting ---")
-    logger.info("You have 5 seconds to switch to your LinkedIn window...")
-    time.sleep(5)
+    countdown(5, "Switch to your LinkedIn window...")
 
     logger.debug(
         f"Instantiating Linkedin_Connector with search_string={search_string}, page_limit={PAGE_LIMIT}, companies={companies}, connections={connections}"

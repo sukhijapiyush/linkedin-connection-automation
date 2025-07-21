@@ -77,7 +77,7 @@ class Linkedin_Connector:
         """
         Perform the initial search on LinkedIn.
         Checks if a browser is running, takes a screenshot, finds the search bar,
-        types the search query, and presses Enter.,
+        types the search query, presses Enter, and clicks the 'People' filter.
         """
         search_string = state["search_string"]
         logger.info(f"Starting initial search for: '{search_string}'")
@@ -89,31 +89,46 @@ class Linkedin_Connector:
             return {"initial_search_status": False}
 
         try:
-
+            # --- Step 1: Perform the search ---
             # IMPORTANT: You need to create a 'search_bar.png' image.
-            # This image should be a small screenshot of the LinkedIn search bar.
             search_bar_location = pyautogui.locateCenterOnScreen(
                 "assets/search_bar.png"
             )
-            logger.info("Attempting to locate the LinkedIn search bar on the screen...")
 
             if search_bar_location:
                 logger.info(f"Found search bar at: {search_bar_location}")
                 pyautogui.click(search_bar_location)
-                time.sleep(1)  # Wait a moment for the click to register
-                pyautogui.write(search_string, interval=0.1)
+                time.sleep(1)
+                # Clear the search bar before typing
+                pyautogui.hotkey("ctrl", "a")
+                pyautogui.press("delete")
+                pyautogui.write(search_string, interval=0.2)
                 pyautogui.press("enter")
                 logger.info(
                     f"Typed '{search_string}' into the search bar and pressed Enter."
                 )
-                return {
-                    "initial_search_status": True,
-                }
+                time.sleep(3)  # Wait for search results to load
             else:
                 logger.error(
-                    "Could not find the LinkedIn search bar on the screen. Make sure the browser window is visible."
+                    "Could not find the LinkedIn search bar. Make sure the browser is visible."
                 )
                 return {"initial_search_status": False}
+
+            # --- Step 2: Filter by 'People' ---
+            # IMPORTANT: You need to create a 'people_filter.png' image.
+            people_filter_location = pyautogui.locateCenterOnScreen(
+                "assets/people_filter.png"
+            )
+
+            if people_filter_location:
+                logger.info(f"Found 'People' filter at: {people_filter_location}")
+                pyautogui.click(people_filter_location)
+                logger.info("Clicked the 'People' filter.")
+                time.sleep(2)  # Wait for filtered results to load
+            else:
+                logger.warning(
+                    "Could not find the 'People' filter button. The script will proceed without it."
+                )
 
         except pyautogui.PyAutoGUIException as e:
             logger.error(f"An error occurred with PyAutoGUI: {e}")

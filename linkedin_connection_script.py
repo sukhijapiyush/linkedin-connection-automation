@@ -107,7 +107,7 @@ class Linkedin_Connector:
                 logger.info(
                     f"Typed '{search_string}' into the search bar and pressed Enter."
                 )
-                time.sleep(3)  # Wait for search results to load
+                time.sleep(10)  # Wait for search results to load
             else:
                 logger.error(
                     "Could not find the LinkedIn search bar. Make sure the browser is visible."

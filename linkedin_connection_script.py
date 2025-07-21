@@ -6,7 +6,12 @@ from typing import TypedDict, List
 import pyautogui
 from langgraph.graph import StateGraph, END
 from langchain.prompts import ChatPromptTemplate
+from langchain_core.messages import HumanMessage
+from langchain_core.output_parsers import JsonOutputParser
 from config import FAILSAFE, API_KEY, smart_llm_object, fast_llm_object, PAGE_LIMIT
+from screenshot import scroll_screenshot
+import base64
+import json
 
 # --- Configuration ---
 
@@ -55,9 +60,13 @@ class LLMManager:
             logger.debug("Using fast_llm_object.")
             self.llm = fast_llm_object
 
-    def invoke(self, prompt: ChatPromptTemplate, **kwargs) -> str:
-        logger.info(f"Invoking LLM with prompt: {prompt} and kwargs: {kwargs}")
-        messages = prompt.format_messages(**kwargs)
+    def invoke(self, prompt, **kwargs) -> str:
+        logger.info(f"Invoking LLM with prompt and kwargs...")
+        if isinstance(prompt, ChatPromptTemplate):
+            messages = prompt.format_messages(**kwargs)
+        else:  # Handle direct message objects for vision
+            messages = prompt
+
         logger.debug(f"Formatted messages: {messages}")
         response = self.llm.invoke(messages)
         logger.debug(f"LLM raw response: {response}")
@@ -79,6 +88,7 @@ class GraphState(TypedDict):
     initial_search_status: bool
     companies: List[str]
     connections: List[str]
+    profiles_to_connect: List[dict]
 
 
 class Linkedin_Connector:
@@ -100,8 +110,6 @@ class Linkedin_Connector:
     def initial_search(self, state):
         """
         Perform the initial search on LinkedIn.
-        Checks if a browser is running, takes a screenshot, finds the search bar,
-        types the search query, presses Enter, and clicks the 'People' filter.
         """
         search_string = state["search_string"]
         logger.info(f"Starting initial search for: '{search_string}'")
@@ -205,7 +213,7 @@ class Linkedin_Connector:
                             logger.debug(f"Typing company name: {company}")
                             pyautogui.write(company, interval=0.1)
                             logger.debug(f"Typed company name: {company}")
-                            time.sleep(2)
+                            time.sleep(5)
                             pyautogui.click(
                                 (add_company_input.x, add_company_input.y + 30)
                             )
@@ -248,7 +256,80 @@ class Linkedin_Connector:
         except Exception as e:
             logger.error(f"An unexpected error occurred during filtering: {e}")
 
-        logger.info("Filter results step completed.")
+        return state
+
+    def identify_profiles(self, state):
+        """
+        Takes a long screenshot and uses Gemini to identify profiles to connect with.
+        """
+        logger.info("Identifying profiles to connect with...")
+
+        try:
+            # Define the region for the screenshot (adjust as needed)
+            # This should be the main content area of the search results
+            screen_width, screen_height = pyautogui.size()
+            screenshot_rect = (
+                int(screen_width * 0.2),
+                150,
+                int(screen_width * 0.6),
+                screen_height - 200,
+            )
+
+            logger.debug(f"Taking a scrolling screenshot of region: {screenshot_rect}")
+            full_page_image = scroll_screenshot(screenshot_rect)
+
+            # Save the image for debugging
+            full_page_image.save("full_page_screenshot.png")
+            logger.info("Saved full page screenshot to 'full_page_screenshot.png'")
+
+            # Convert image to base64
+            with open("full_page_screenshot.png", "rb") as image_file:
+                image_base64 = base64.b64encode(image_file.read()).decode("utf-8")
+
+            # Prepare the prompt for the vision model
+            prompt = [
+                HumanMessage(
+                    content=[
+                        {
+                            "type": "text",
+                            "text": """
+                        Analyze this screenshot of a LinkedIn search results page.
+                        Identify all the "Connect" buttons for each person listed.
+                        Return a JSON object with a key "connect_buttons" which is a list of dictionaries.
+                        Each dictionary should contain the 'x' and 'y' coordinates of the center of a "Connect" button.
+                        Example: {"connect_buttons": [{"x": 123, "y": 456}, {"x": 123, "y": 789}]}
+                        """,
+                        },
+                        {
+                            "type": "image_url",
+                            "image_url": f"data:image/png;base64,{image_base64}",
+                        },
+                    ]
+                )
+            ]
+
+            logger.info("Sending screenshot to Gemini for analysis...")
+            response_content = smart_llm.invoke(prompt)
+
+            # Clean the response to get valid JSON
+            json_response_str = (
+                response_content.strip().replace("```json", "").replace("```", "")
+            )
+
+            logger.debug(f"Cleaned JSON response string: {json_response_str}")
+
+            response_data = json.loads(json_response_str)
+            profiles = response_data.get("connect_buttons", [])
+            logger.info(
+                f"Identified {len(profiles)} potential profiles to connect with."
+            )
+
+            state["profiles_to_connect"] = profiles
+
+        except Exception as e:
+            logger.error(f"An error occurred in identify_profiles: {e}")
+            state["profiles_to_connect"] = []
+
         return state
 
     def should_continue(self, state):
@@ -268,6 +349,7 @@ class Linkedin_Connector:
 
         workflow.add_node("initial_search", self.initial_search)
         workflow.add_node("filter_results", self.filter_results)
+        workflow.add_node("identify_profiles", self.identify_profiles)
 
         workflow.set_entry_point("initial_search")
 
@@ -275,7 +357,8 @@ class Linkedin_Connector:
             "initial_search",
             self.should_continue,
         )
-        workflow.add_edge("filter_results", END)
+        workflow.add_edge("filter_results", "identify_profiles")
+        workflow.add_edge("identify_profiles", END)
 
         return workflow.compile()
 
@@ -289,7 +372,8 @@ class Linkedin_Connector:
             "current_page": self.current_page,
             "companies": self.companies,
             "connections": self.connections,
-            "initial_search_status": False,  # Explicitly set initial status
+            "initial_search_status": False,
+            "profiles_to_connect": [],
         }
         self.workflow.invoke(initial_state)
 
@@ -304,7 +388,7 @@ if __name__ == "__main__":
     search_string = input("\nEnter the search string: ")
     if not search_string.strip():
         default_search = "Data Scientist"
-        logger.warning("No search string provided. Using default: 'Data Scientist'.")
+        logger.warning(f"No search string provided. Using default: '{default_search}'.")
         search_string = default_search
     logger.debug(f"User input - search_string: {search_string}")
 
@@ -313,20 +397,20 @@ if __name__ == "__main__":
     )
     if not companies_input.strip():
         default_companies = "Google, Microsoft"
-        logger.warning("No companies provided. Using default: 'Google, Microsoft'.")
+        logger.warning(f"No companies provided. Using default: '{default_companies}'.")
         companies_input = default_companies
     logger.debug(f"User input - companies_input raw: {companies_input}")
     companies = [c.strip() for c in companies_input.split(",") if c.strip()]
-    logger.debug(f"Parsed companies: {companies}")
 
     connections_input = input(
         "Enter connection levels to filter by (e.g., 1st,2nd,3rd+): "
     )
     if not connections_input.strip():
         default_connections = ""
-        logger.warning("No connections provided. Using default: ''.")
+        logger.warning(
+            f"No connections provided. Using default: '{default_connections}'."
+        )
         connections_input = default_connections
-    logger.debug(f"User input - connections_input raw: {connections_input}")
     connections = [c.strip() for c in connections_input.split(",") if c.strip()]
     logger.debug(f"Parsed connections: {connections}")
 
